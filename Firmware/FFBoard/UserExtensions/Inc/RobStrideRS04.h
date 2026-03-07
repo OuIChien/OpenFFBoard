@@ -71,6 +71,7 @@ protected:
 	CANPort* canPort = &canport;
 	uint8_t motorId = 1;
 	uint8_t instanceId = 0;
+	int32_t filterId = 0;
 	RS04Protocol protocol = RS04Protocol::MIT;
 	
 	float maxTorque = 5.0f; // Default 5Nm for safety

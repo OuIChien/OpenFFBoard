@@ -32,12 +32,7 @@ RobStrideRS04::RobStrideRS04(uint8_t instance)
 	motorId = instance + 1; // Default ID 1 and 2
 	restoreFlash();
 	
-	// Setup CAN Filter
-	CAN_filter filter;
-	filter.filter_id = 0; // Receive all for now or specific based on protocol
-	filter.filter_mask = 0;
-	filter.buffer = instance % 2;
-	this->canPort->addCanFilter(filter);
+	setCanFilter();
 	
 	this->registerCommands();
 	this->canPort->takePort();
@@ -46,7 +41,18 @@ RobStrideRS04::RobStrideRS04(uint8_t instance)
 
 RobStrideRS04::~RobStrideRS04() {
 	stopMotor();
+	canPort->removeCanFilter(filterId);
 	this->canPort->freePort();
+}
+
+void RobStrideRS04::setCanFilter() {
+	CAN_filter filter;
+	// RS04 MIT response is standard frame (11-bit) with ID = motorId
+	// RS04 Private response is extended frame (29-bit)
+	filter.filter_id = 0; 
+	filter.filter_mask = 0; // Receive all to handle both protocols easily
+	filter.buffer = instanceId % 2;
+	this->filterId = this->canPort->addCanFilter(filter);
 }
 
 void RobStrideRS04::registerCommands() {
@@ -98,7 +104,7 @@ void RobStrideRS04::enterMITMode() {
 	msg.header.id = motorId;
 	msg.header.length = 8;
 	msg.header.rtr = false;
-	msg.header.extid = false;
+	msg.header.extId = false;
 	memset(msg.data, 0xFF, 7);
 	msg.data[7] = 0xFC; // Enable MIT Mode
 	canPort->sendMessage(msg);
@@ -109,7 +115,7 @@ void RobStrideRS04::exitMITMode() {
 	msg.header.id = motorId;
 	msg.header.length = 8;
 	msg.header.rtr = false;
-	msg.header.extid = false;
+	msg.header.extId = false;
 	memset(msg.data, 0xFF, 7);
 	msg.data[7] = 0xFD; // Exit MIT Mode
 	canPort->sendMessage(msg);
@@ -119,7 +125,7 @@ void RobStrideRS04::sendTorqueMIT(float torque) {
 	CAN_tx_msg msg;
 	msg.header.id = motorId;
 	msg.header.length = 8;
-	msg.header.extid = false;
+	msg.header.extId = false;
 
 	// MIT Frame: P(16), V(12), KP(12), KD(12), T(12)
 	// For FFB, we mainly use T and set P, V, KP, KD to 0 or neutral
@@ -146,7 +152,7 @@ void RobStrideRS04::sendTorquePrivate(float torque) {
 	// RS04 Private Protocol: 0x10050100 + ID (Extended)
 	// Command for Current Control
 	msg.header.id = 0x10050100 | motorId; 
-	msg.header.extid = true;
+	msg.header.extId = true;
 	msg.header.length = 4;
 	
 	int32_t current_ma = (int32_t)(torque * 1000.0f); // Simplistic torque to current mapping
@@ -157,6 +163,9 @@ void RobStrideRS04::sendTorquePrivate(float torque) {
 
 // --- Helpers ---
 uint16_t RobStrideRS04::float_to_uint(float x, float x_min, float x_max, int bits) {
+	// Clamping input to prevent bit wrapping (Crucial for safety)
+	if (x > x_max) x = x_max;
+	if (x < x_min) x = x_min;
 	float span = x_max - x_min;
 	float offset = x_min;
 	return (uint16_t)((x - offset) * ((float)((1 << bits) - 1)) / span);
@@ -173,7 +182,7 @@ void RobStrideRS04::canRxPendCallback(CANPort* port, CAN_rx_msg& msg) {
 	lastMessageTick = HAL_GetTick();
 	isConnected = true;
 
-	if (!msg.header.extid) { // MIT Response
+	if (!msg.header.extId) { // MIT Response
 		if (msg.header.id != motorId) return;
 		
 		// Parse MIT feedback
@@ -215,19 +224,20 @@ void RobStrideRS04::setPos(int32_t pos) {
 
 void RobStrideRS04::restoreFlash() {
 	uint16_t val = 0;
-	if (Flash_Read(ADR_USER_CONF_START + (instanceId * 8), &val)) {
+	if (Flash_Read(ADR_AXIS1_CONFIG + 20, &val)) { // Use offset from known address
 		protocol = (RS04Protocol)(val & 0x1);
 		motorId = (val >> 8) & 0xFF;
 	}
-	if (Flash_Read(ADR_USER_CONF_START + (instanceId * 8) + 1, &val)) {
+	if (Flash_Read(ADR_AXIS1_CONFIG + 21, &val)) {
 		maxTorque = (float)val / 100.0f;
+		if (maxTorque > 12.0f) maxTorque = 12.0f; // Limit to MIT protocol max physical range
 	}
 }
 
 void RobStrideRS04::saveFlash() {
 	uint16_t val = ((uint16_t)motorId << 8) | (uint8_t)protocol;
-	Flash_Write(ADR_USER_CONF_START + (instanceId * 8), val);
-	Flash_Write(ADR_USER_CONF_START + (instanceId * 8) + 1, (uint16_t)(maxTorque * 100.0f));
+	Flash_Write(ADR_AXIS1_CONFIG + 20, val);
+	Flash_Write(ADR_AXIS1_CONFIG + 21, (uint16_t)(maxTorque * 100.0f));
 }
 
 CommandStatus RobStrideRS04::command(const ParsedCommand& cmd, std::vector<CommandReply>& replies) {
@@ -240,8 +250,12 @@ CommandStatus RobStrideRS04::command(const ParsedCommand& cmd, std::vector<Comma
 		else replies.emplace_back((uint8_t)protocol);
 		break;
 	case RS04Commands::maxtorque:
-		if (cmd.type == CMDtype::set) maxTorque = (float)cmd.val / 100.0f;
-		else replies.emplace_back((uint32_t)(maxTorque * 100.0f));
+		if (cmd.type == CMDtype::set) {
+			maxTorque = (float)cmd.val / 100.0f;
+			if (maxTorque > 12.0f) maxTorque = 12.0f; // Max clamp for safety
+		} else {
+			replies.emplace_back((uint32_t)(maxTorque * 100.0f));
+		}
 		break;
 	case RS04Commands::connected:
 		replies.emplace_back(isConnected ? 1 : 0);

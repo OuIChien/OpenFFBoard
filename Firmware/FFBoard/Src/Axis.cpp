@@ -13,6 +13,7 @@
 #include "ODriveCAN.h"
 #include "MotorSimplemotion.h"
 #include "RmdMotorCAN.h"
+#include "RobStrideRS04.h"
 #include "critical.hpp"
 
 //////////////////////////////////////////////
@@ -53,6 +54,7 @@ const std::vector<class_entry<MotorDriver>> Axis::axis1_drivers =
 #ifdef RMDCAN
 	add_class<RmdMotorCAN1,MotorDriver>(11),
 #endif
+	add_class<RobStrideRS04_1, MotorDriver>(13),
 };
 
 /**
@@ -77,9 +79,7 @@ const std::vector<class_entry<MotorDriver>> Axis::axis2_drivers =
 #ifdef RMDCAN
 	add_class<RmdMotorCAN2,MotorDriver>(12),
 #endif
-//#ifdef SIMPLEMOTION
-//	add_class<MotorSimplemotion2,MotorDriver>(10), // TODO this likely does not work reliably with a single uart port and multiple devices
-//#endif
+	add_class<RobStrideRS04_2, MotorDriver>(14),
 };
 
 

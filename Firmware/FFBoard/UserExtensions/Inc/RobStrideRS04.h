@@ -9,6 +9,7 @@
 #define USEREXTENSIONS_INC_ROBSTRIDERS04_H_
 
 #include "MotorDriver.h"
+#include "cpp_target_config.h"
 #include "CAN.h"
 #include "Encoder.h"
 #include "thread.hpp"
@@ -57,6 +58,8 @@ public:
 	CommandStatus command(const ParsedCommand& cmd, std::vector<CommandReply>& replies) override;
 	void saveFlash() override;
 	void restoreFlash() override;
+
+	void setCanFilter();
 
 protected:
 	void sendTorqueMIT(float torque);

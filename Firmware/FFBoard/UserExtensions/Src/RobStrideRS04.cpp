@@ -7,6 +7,7 @@
 
 #include "RobStrideRS04.h"
 #include "ClassIDs.h"
+#include "eeprom_addresses.h"
 #include <algorithm>
 #include <cstring>
 

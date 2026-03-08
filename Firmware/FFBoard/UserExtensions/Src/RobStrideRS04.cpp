@@ -27,22 +27,16 @@ ClassIdentifier RobStrideRS04_2::info = {
 // --- Constructor ---
 RobStrideRS04::RobStrideRS04(uint8_t instance) 
 	: CommandHandler("rs04", instance == 0 ? CLSID_MOT_RS04_1 : CLSID_MOT_RS04_2, instance),
-	  Thread("RS04", 1024, RS04_THREAD_PRIO),
+	  Thread("RS04", 2048, RS04_THREAD_PRIO),
 	  instanceId(instance) {
 	
-	motorId = instance + 1; // Default ID 1 and 2
-	masterId = 0xFD; // Default Master ID for Private Protocol
+	motorId = instance + 1; 
+	masterId = 0xFD; 
 	restoreFlash();
 	
 	setCanFilter();
-	
 	this->registerCommands();
 	
-	if(this->canPort->getSpeedPreset() != 5){
-		this->canPort->setSpeedPreset(5); // RobStride RS04 requires 1Mbps
-	}
-	
-	this->canPort->takePort();
 	this->Start();
 }
 
@@ -54,11 +48,9 @@ RobStrideRS04::~RobStrideRS04() {
 
 void RobStrideRS04::setCanFilter() {
 	CAN_filter filter;
-	// RS04 MIT response is standard frame (11-bit)
-	// RS04 Private response is extended frame (29-bit)
 	filter.filter_id = 0; 
 	filter.filter_mask = 0; 
-	filter.extid = true; // Essential for receiving Extended Frames
+	filter.extid = true; 
 	filter.buffer = instanceId % 2;
 	this->filterId = this->canPort->addCanFilter(filter);
 }
@@ -111,7 +103,6 @@ bool RobStrideRS04::motorReady() {
 
 void RobStrideRS04::sendEnablePrivate() {
 	CAN_tx_msg msg;
-	// Type 3: Enable. ID[28:24]=3, ID[23:8]=masterId, ID[7:0]=motorId
 	msg.header.id = (3 << 24) | (uint32_t)masterId << 8 | motorId;
 	msg.header.extId = true;
 	msg.header.length = 8;
@@ -121,7 +112,6 @@ void RobStrideRS04::sendEnablePrivate() {
 
 void RobStrideRS04::sendStopPrivate() {
 	CAN_tx_msg msg;
-	// Type 4: Stop. ID[28:24]=4, ID[23:8]=masterId, ID[7:0]=motorId
 	msg.header.id = (4 << 24) | (uint32_t)masterId << 8 | motorId;
 	msg.header.extId = true;
 	msg.header.length = 8;
@@ -131,17 +121,15 @@ void RobStrideRS04::sendStopPrivate() {
 
 void RobStrideRS04::sendTorquePrivate(float torque) {
 	CAN_tx_msg msg;
-	// Type 1: Control. ID[28:24]=1, ID[23:8]=Torque(uint16), ID[7:0]=motorId
 	uint16_t t_int = float_to_uint(torque, -120.0f, 120.0f, 16);
 	msg.header.id = (1 << 24) | (uint32_t)t_int << 8 | motorId;
 	msg.header.extId = true;
 	msg.header.length = 8;
 
-	// For FFB, we mainly use torque in ID, set others in data to neutral/zero
-	uint16_t p_int = float_to_uint(0, -12.57f, 12.57f, 16); // Target Pos 0
-	uint16_t v_int = float_to_uint(0, -15.0f, 15.0f, 16);   // Target Vel 0
-	uint16_t kp_int = float_to_uint(0, 0, 5000.0f, 16);    // Kp 0 for torque mode
-	uint16_t kd_int = float_to_uint(0, 0, 100.0f, 16);     // Kd 0
+	uint16_t p_int = float_to_uint(0, -12.57f, 12.57f, 16);
+	uint16_t v_int = float_to_uint(0, -15.0f, 15.0f, 16);
+	uint16_t kp_int = float_to_uint(0, 0, 5000.0f, 16);
+	uint16_t kd_int = float_to_uint(0, 0, 100.0f, 16);
 
 	msg.data[0] = p_int >> 8;
 	msg.data[1] = p_int & 0xFF;
@@ -155,7 +143,6 @@ void RobStrideRS04::sendTorquePrivate(float torque) {
 	canPort->sendMessage(msg);
 }
 
-// MIT implementation remains similar but ensure correct limits
 void RobStrideRS04::enterMITMode() {
 	CAN_tx_msg msg;
 	msg.header.id = motorId;
@@ -217,7 +204,7 @@ float RobStrideRS04::uint_to_float(int x_int, float x_min, float x_max, int bits
 
 // --- Data Feedback ---
 void RobStrideRS04::canRxPendCallback(CANPort* port, CAN_rx_msg& msg) {
-	if (!msg.header.extId) { // MIT Response (Standard ID)
+	if (!msg.header.extId) { 
 		if (msg.header.id != motorId) return;
 		lastMessageTick = HAL_GetTick();
 		isConnected = true;
@@ -230,12 +217,12 @@ void RobStrideRS04::canRxPendCallback(CANPort* port, CAN_rx_msg& msg) {
 		lastVelocity = uint_to_float(v_int, -45.0f, 45.0f, 12);
 		lastTorqueFeedback = uint_to_float(t_int, -12.0f, 12.0f, 12);
 		lastTemp = msg.data[6];
-	} else { // Private Protocol Response (Extended ID)
+	} else { 
 		uint8_t type = (msg.header.id >> 24) & 0x1F;
 		uint8_t respMotorId = (msg.header.id >> 8) & 0xFF;
 		
 		if (respMotorId == motorId) {
-			if (type == 2) { // Type 2: Feedback
+			if (type == 2) { 
 				lastMessageTick = HAL_GetTick();
 				isConnected = true;
 
@@ -247,7 +234,7 @@ void RobStrideRS04::canRxPendCallback(CANPort* port, CAN_rx_msg& msg) {
 				lastVelocity = uint_to_float(v_int, -15.0f, 15.0f, 16);
 				lastTorqueFeedback = uint_to_float(t_int, -120.0f, 120.0f, 16);
 				lastTemp = msg.data[6] / 10.0f;
-			} else if (type == 0) { // Type 0: Get ID Response
+			} else if (type == 0) { 
 				lastMessageTick = HAL_GetTick();
 				isConnected = true;
 			}
@@ -256,13 +243,17 @@ void RobStrideRS04::canRxPendCallback(CANPort* port, CAN_rx_msg& msg) {
 }
 
 void RobStrideRS04::Run() {
+	if(this->canPort->getSpeedPreset() != 5){
+		this->canPort->setSpeedPreset(5); 
+	}
+	this->canPort->takePort();
+
 	while (true) {
 		if (HAL_GetTick() - lastMessageTick > 500) {
 			isConnected = false;
 		}
 
 		if (!isConnected && protocol == RS04Protocol::PRIVATE) {
-			// Send Type 0 (Get ID) to wake up the motor and trigger feedback
 			CAN_tx_msg msg;
 			msg.header.id = (0 << 24) | (uint32_t)masterId << 8 | motorId;
 			msg.header.extId = true;
@@ -276,7 +267,7 @@ void RobStrideRS04::Run() {
 
 // --- Encoder & Storage Implementation ---
 int32_t RobStrideRS04::getPos() {
-	return (int32_t)(lastPos * 10430.378f); // rad to counts (65536 / 2pi)
+	return (int32_t)(lastPos * 10430.378f); 
 }
 
 float RobStrideRS04::getPos_f() {
@@ -284,13 +275,12 @@ float RobStrideRS04::getPos_f() {
 }
 
 void RobStrideRS04::setPos(int32_t pos) {
-	// RS04 support: Send Type 6 (Set Zero)
 	CAN_tx_msg msg;
 	msg.header.id = (6 << 24) | (uint32_t)masterId << 8 | motorId;
 	msg.header.extId = true;
 	msg.header.length = 8;
 	memset(msg.data, 0, 8);
-	msg.data[0] = 0x01; // Set current as zero
+	msg.data[0] = 0x01; 
 	canPort->sendMessage(msg);
 }
 
@@ -315,7 +305,7 @@ CommandStatus RobStrideRS04::command(const ParsedCommand& cmd, std::vector<Comma
 	switch ((RS04Commands)cmd.cmdId) {
 	case RS04Commands::canid:
 		handleGetSet(cmd, replies, motorId);
-		if (cmd.type == CMDtype::set) setCanFilter(); // Update filter if ID changed
+		if (cmd.type == CMDtype::set) setCanFilter(); 
 		break;
 	case RS04Commands::protocol:
 		if (cmd.type == CMDtype::set) protocol = (RS04Protocol)cmd.val;

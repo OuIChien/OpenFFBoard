@@ -82,6 +82,7 @@ void RobStrideRS04::startMotor() {
 		enterMITMode();
 	} else {
 		sendEnablePrivate();
+		sendEnableActiveReporting();
 	}
 }
 
@@ -116,6 +117,17 @@ void RobStrideRS04::sendStopPrivate() {
 	msg.header.extId = true;
 	msg.header.length = 8;
 	memset(msg.data, 0, 8);
+	canPort->sendMessage(msg);
+}
+
+void RobStrideRS04::sendEnableActiveReporting() {
+	if (protocol != RS04Protocol::PRIVATE) return;
+	CAN_tx_msg msg;
+	msg.header.id = (24 << 24) | (uint32_t)masterId << 8 | motorId;
+	msg.header.extId = true;
+	msg.header.length = 8;
+	memset(msg.data, 0, 8);
+	msg.data[0] = 0x01; // Enable reporting
 	canPort->sendMessage(msg);
 }
 
@@ -248,6 +260,8 @@ void RobStrideRS04::Run() {
 	}
 	this->canPort->takePort();
 
+	bool wasConnected = false;
+
 	while (true) {
 		if (HAL_GetTick() - lastMessageTick > 500) {
 			isConnected = false;
@@ -259,6 +273,10 @@ void RobStrideRS04::Run() {
 			msg.header.extId = true;
 			msg.header.length = 0;
 			canPort->sendMessage(msg);
+			wasConnected = false;
+		} else if (isConnected && !wasConnected && protocol == RS04Protocol::PRIVATE) {
+			sendEnableActiveReporting();
+			wasConnected = true;
 		}
 		
 		Delay(500);

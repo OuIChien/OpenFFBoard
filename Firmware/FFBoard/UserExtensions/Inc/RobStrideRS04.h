@@ -66,6 +66,7 @@ protected:
 	void sendTorquePrivate(float torque);
 	void sendEnablePrivate();
 	void sendStopPrivate();
+	void sendEnableActiveReporting();
 	void enterMITMode();
 	void exitMITMode();
 	

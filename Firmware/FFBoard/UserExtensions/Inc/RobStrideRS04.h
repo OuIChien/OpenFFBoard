@@ -64,6 +64,8 @@ public:
 protected:
 	void sendTorqueMIT(float torque);
 	void sendTorquePrivate(float torque);
+	void sendEnablePrivate();
+	void sendStopPrivate();
 	void enterMITMode();
 	void exitMITMode();
 	
@@ -73,6 +75,7 @@ protected:
 
 	CANPort* canPort = &canport;
 	uint8_t motorId = 1;
+	uint8_t masterId = 0xFD;
 	uint8_t instanceId = 0;
 	int32_t filterId = 0;
 	RS04Protocol protocol = RS04Protocol::MIT;
@@ -81,7 +84,7 @@ protected:
 	float lastPos = 0;
 	float lastVelocity = 0;
 	float lastTorqueFeedback = 0;
-	uint8_t lastTemp = 0;
+	float lastTemp = 0;
 	
 	uint32_t lastMessageTick = 0;
 	bool isConnected = false;

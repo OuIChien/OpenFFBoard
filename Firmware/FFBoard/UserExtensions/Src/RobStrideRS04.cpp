@@ -31,11 +31,17 @@ RobStrideRS04::RobStrideRS04(uint8_t instance)
 	  instanceId(instance) {
 	
 	motorId = instance + 1; // Default ID 1 and 2
+	masterId = 0xFD; // Default Master ID for Private Protocol
 	restoreFlash();
 	
 	setCanFilter();
 	
 	this->registerCommands();
+	
+	if(this->canPort->getSpeedPreset() != 5){
+		this->canPort->setSpeedPreset(5); // RobStride RS04 requires 1Mbps
+	}
+	
 	this->canPort->takePort();
 	this->Start();
 }
@@ -48,10 +54,10 @@ RobStrideRS04::~RobStrideRS04() {
 
 void RobStrideRS04::setCanFilter() {
 	CAN_filter filter;
-	// RS04 MIT response is standard frame (11-bit) with ID = motorId
-	// RS04 Private response is extended frame (29-bit)
+	// RS04 Private response: Bit 28-24 = 2, Bit 8-23 = motorId, Bit 7-0 = masterId
+	// Since OpenFFBoard CAN filter is 32-bit, we receive all to handle logic in callback
 	filter.filter_id = 0; 
-	filter.filter_mask = 0; // Receive all to handle both protocols easily
+	filter.filter_mask = 0; 
 	filter.buffer = instanceId % 2;
 	this->filterId = this->canPort->addCanFilter(filter);
 }
@@ -81,6 +87,8 @@ void RobStrideRS04::startMotor() {
 	isActive = true;
 	if (protocol == RS04Protocol::MIT) {
 		enterMITMode();
+	} else {
+		sendEnablePrivate();
 	}
 }
 
@@ -90,7 +98,7 @@ void RobStrideRS04::stopMotor() {
 		sendTorqueMIT(0.0f);
 		exitMITMode();
 	} else {
-		sendTorquePrivate(0.0f);
+		sendStopPrivate();
 	}
 }
 
@@ -100,14 +108,60 @@ bool RobStrideRS04::motorReady() {
 
 // --- Protocol Implementations ---
 
+void RobStrideRS04::sendEnablePrivate() {
+	CAN_tx_msg msg;
+	// Type 3: Enable. ID[28:24]=3, ID[23:8]=masterId, ID[7:0]=motorId
+	msg.header.id = (3 << 24) | (uint32_t)masterId << 8 | motorId;
+	msg.header.extId = true;
+	msg.header.length = 8;
+	memset(msg.data, 0, 8);
+	canPort->sendMessage(msg);
+}
+
+void RobStrideRS04::sendStopPrivate() {
+	CAN_tx_msg msg;
+	// Type 4: Stop. ID[28:24]=4, ID[23:8]=masterId, ID[7:0]=motorId
+	msg.header.id = (4 << 24) | (uint32_t)masterId << 8 | motorId;
+	msg.header.extId = true;
+	msg.header.length = 8;
+	memset(msg.data, 0, 8);
+	canPort->sendMessage(msg);
+}
+
+void RobStrideRS04::sendTorquePrivate(float torque) {
+	CAN_tx_msg msg;
+	// Type 1: Control. ID[28:24]=1, ID[23:8]=Torque(uint16), ID[7:0]=motorId
+	uint16_t t_int = float_to_uint(torque, -120.0f, 120.0f, 16);
+	msg.header.id = (1 << 24) | (uint32_t)t_int << 8 | motorId;
+	msg.header.extId = true;
+	msg.header.length = 8;
+
+	// For FFB, we mainly use torque in ID, set others in data to neutral/zero
+	uint16_t p_int = float_to_uint(0, -12.57f, 12.57f, 16); // Target Pos 0
+	uint16_t v_int = float_to_uint(0, -15.0f, 15.0f, 16);   // Target Vel 0
+	uint16_t kp_int = float_to_uint(0, 0, 5000.0f, 16);    // Kp 0 for torque mode
+	uint16_t kd_int = float_to_uint(0, 0, 100.0f, 16);     // Kd 0
+
+	msg.data[0] = p_int >> 8;
+	msg.data[1] = p_int & 0xFF;
+	msg.data[2] = v_int >> 8;
+	msg.data[3] = v_int & 0xFF;
+	msg.data[4] = kp_int >> 8;
+	msg.data[5] = kp_int & 0xFF;
+	msg.data[6] = kd_int >> 8;
+	msg.data[7] = kd_int & 0xFF;
+
+	canPort->sendMessage(msg);
+}
+
+// MIT implementation remains similar but ensure correct limits
 void RobStrideRS04::enterMITMode() {
 	CAN_tx_msg msg;
 	msg.header.id = motorId;
 	msg.header.length = 8;
-	msg.header.rtr = false;
 	msg.header.extId = false;
 	memset(msg.data, 0xFF, 7);
-	msg.data[7] = 0xFC; // Enable MIT Mode
+	msg.data[7] = 0xFC; 
 	canPort->sendMessage(msg);
 }
 
@@ -115,10 +169,9 @@ void RobStrideRS04::exitMITMode() {
 	CAN_tx_msg msg;
 	msg.header.id = motorId;
 	msg.header.length = 8;
-	msg.header.rtr = false;
 	msg.header.extId = false;
 	memset(msg.data, 0xFF, 7);
-	msg.data[7] = 0xFD; // Exit MIT Mode
+	msg.data[7] = 0xFD; 
 	canPort->sendMessage(msg);
 }
 
@@ -128,13 +181,11 @@ void RobStrideRS04::sendTorqueMIT(float torque) {
 	msg.header.length = 8;
 	msg.header.extId = false;
 
-	// MIT Frame: P(16), V(12), KP(12), KD(12), T(12)
-	// For FFB, we mainly use T and set P, V, KP, KD to 0 or neutral
 	uint16_t p_int = float_to_uint(0, -12.5f, 12.5f, 16);
 	uint16_t v_int = float_to_uint(0, -45.0f, 45.0f, 12);
 	uint16_t kp_int = float_to_uint(0, 0, 500.0f, 12);
 	uint16_t kd_int = float_to_uint(0, 0, 5.0f, 12);
-	uint16_t t_int = float_to_uint(torque, -12.0f, 12.0f, 12);
+	uint16_t t_int = float_to_uint(torque, -120.0f, 120.0f, 12);
 
 	msg.data[0] = p_int >> 8;
 	msg.data[1] = p_int & 0xFF;
@@ -148,23 +199,8 @@ void RobStrideRS04::sendTorqueMIT(float torque) {
 	canPort->sendMessage(msg);
 }
 
-void RobStrideRS04::sendTorquePrivate(float torque) {
-	CAN_tx_msg msg;
-	// RS04 Private Protocol: 0x10050100 + ID (Extended)
-	// Command for Current Control
-	msg.header.id = 0x10050100 | motorId; 
-	msg.header.extId = true;
-	msg.header.length = 4;
-	
-	int32_t current_ma = (int32_t)(torque * 1000.0f); // Simplistic torque to current mapping
-	memcpy(msg.data, &current_ma, 4);
-	
-	canPort->sendMessage(msg);
-}
-
 // --- Helpers ---
 uint16_t RobStrideRS04::float_to_uint(float x, float x_min, float x_max, int bits) {
-	// Clamping input to prevent bit wrapping (Crucial for safety)
 	if (x > x_max) x = x_max;
 	if (x < x_min) x = x_min;
 	float span = x_max - x_min;
@@ -180,13 +216,11 @@ float RobStrideRS04::uint_to_float(int x_int, float x_min, float x_max, int bits
 
 // --- Data Feedback ---
 void RobStrideRS04::canRxPendCallback(CANPort* port, CAN_rx_msg& msg) {
-	lastMessageTick = HAL_GetTick();
-	isConnected = true;
-
-	if (!msg.header.extId) { // MIT Response
+	if (!msg.header.extId) { // MIT Response (Standard ID)
 		if (msg.header.id != motorId) return;
-		
-		// Parse MIT feedback
+		lastMessageTick = HAL_GetTick();
+		isConnected = true;
+
 		uint16_t p_int = (msg.data[1] << 8) | msg.data[2];
 		uint16_t v_int = (msg.data[3] << 4) | (msg.data[4] >> 4);
 		uint16_t t_int = ((msg.data[4] & 0xF) << 8) | msg.data[5];
@@ -195,9 +229,28 @@ void RobStrideRS04::canRxPendCallback(CANPort* port, CAN_rx_msg& msg) {
 		lastVelocity = uint_to_float(v_int, -45.0f, 45.0f, 12);
 		lastTorqueFeedback = uint_to_float(t_int, -12.0f, 12.0f, 12);
 		lastTemp = msg.data[6];
-	} else { // Private Protocol Response
-		if ((msg.header.id & 0xFF) != motorId) return;
-		// Handle private status frames here
+	} else { // Private Protocol Response (Extended ID)
+		uint8_t type = (msg.header.id >> 24) & 0x1F;
+		uint8_t respMotorId = (msg.header.id >> 8) & 0xFF;
+		
+		if (respMotorId == motorId) {
+			if (type == 2) { // Type 2: Feedback
+				lastMessageTick = HAL_GetTick();
+				isConnected = true;
+
+				uint16_t p_int = (msg.data[0] << 8) | msg.data[1];
+				uint16_t v_int = (msg.data[2] << 8) | msg.data[3];
+				uint16_t t_int = (msg.data[4] << 8) | msg.data[5];
+
+				lastPos = uint_to_float(p_int, -12.57f, 12.57f, 16);
+				lastVelocity = uint_to_float(v_int, -15.0f, 15.0f, 16);
+				lastTorqueFeedback = uint_to_float(t_int, -120.0f, 120.0f, 16);
+				lastTemp = msg.data[6] / 10.0f;
+			} else if (type == 0) { // Type 0: Get ID Response
+				lastMessageTick = HAL_GetTick();
+				isConnected = true;
+			}
+		}
 	}
 }
 
@@ -206,7 +259,17 @@ void RobStrideRS04::Run() {
 		if (HAL_GetTick() - lastMessageTick > 500) {
 			isConnected = false;
 		}
-		Delay(100);
+
+		if (!isConnected && protocol == RS04Protocol::PRIVATE) {
+			// Send Type 0 (Get ID) to wake up the motor and trigger feedback
+			CAN_tx_msg msg;
+			msg.header.id = (0 << 24) | (uint32_t)masterId << 8 | motorId;
+			msg.header.extId = true;
+			msg.header.length = 0;
+			canPort->sendMessage(msg);
+		}
+		
+		Delay(500);
 	}
 }
 
@@ -220,18 +283,24 @@ float RobStrideRS04::getPos_f() {
 }
 
 void RobStrideRS04::setPos(int32_t pos) {
-	// RS04 supports zeroing via command
+	// RS04 support: Send Type 6 (Set Zero)
+	CAN_tx_msg msg;
+	msg.header.id = (6 << 24) | (uint32_t)masterId << 8 | motorId;
+	msg.header.extId = true;
+	msg.header.length = 8;
+	memset(msg.data, 0, 8);
+	msg.data[0] = 0x01; // Set current as zero
+	canPort->sendMessage(msg);
 }
 
 void RobStrideRS04::restoreFlash() {
 	uint16_t val = 0;
-	if (Flash_Read(ADR_AXIS1_CONFIG + 20, &val)) { // Use offset from known address
+	if (Flash_Read(ADR_AXIS1_CONFIG + 20, &val)) {
 		protocol = (RS04Protocol)(val & 0x1);
 		motorId = (val >> 8) & 0xFF;
 	}
 	if (Flash_Read(ADR_AXIS1_CONFIG + 21, &val)) {
 		maxTorque = (float)val / 100.0f;
-		if (maxTorque > 12.0f) maxTorque = 12.0f; // Limit to MIT protocol max physical range
 	}
 }
 
@@ -245,6 +314,7 @@ CommandStatus RobStrideRS04::command(const ParsedCommand& cmd, std::vector<Comma
 	switch ((RS04Commands)cmd.cmdId) {
 	case RS04Commands::canid:
 		handleGetSet(cmd, replies, motorId);
+		if (cmd.type == CMDtype::set) setCanFilter(); // Update filter if ID changed
 		break;
 	case RS04Commands::protocol:
 		if (cmd.type == CMDtype::set) protocol = (RS04Protocol)cmd.val;
@@ -253,7 +323,6 @@ CommandStatus RobStrideRS04::command(const ParsedCommand& cmd, std::vector<Comma
 	case RS04Commands::maxtorque:
 		if (cmd.type == CMDtype::set) {
 			maxTorque = (float)cmd.val / 100.0f;
-			if (maxTorque > 12.0f) maxTorque = 12.0f; // Max clamp for safety
 		} else {
 			replies.emplace_back((uint32_t)(maxTorque * 100.0f));
 		}

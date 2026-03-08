@@ -26,8 +26,8 @@ ClassIdentifier RobStrideRS04_2::info = {
 
 // --- Constructor ---
 RobStrideRS04::RobStrideRS04(uint8_t instance) 
-	: CommandHandler("rs04", CLSID_MOT_RS04_1, instance),
-	  Thread("RS04", RS04_THREAD_MEM, RS04_THREAD_PRIO),
+	: CommandHandler("rs04", instance == 0 ? CLSID_MOT_RS04_1 : CLSID_MOT_RS04_2, instance),
+	  Thread("RS04", 1024, RS04_THREAD_PRIO),
 	  instanceId(instance) {
 	
 	motorId = instance + 1; // Default ID 1 and 2
@@ -54,10 +54,11 @@ RobStrideRS04::~RobStrideRS04() {
 
 void RobStrideRS04::setCanFilter() {
 	CAN_filter filter;
-	// RS04 Private response: Bit 28-24 = 2, Bit 8-23 = motorId, Bit 7-0 = masterId
-	// Since OpenFFBoard CAN filter is 32-bit, we receive all to handle logic in callback
+	// RS04 MIT response is standard frame (11-bit)
+	// RS04 Private response is extended frame (29-bit)
 	filter.filter_id = 0; 
 	filter.filter_mask = 0; 
+	filter.extid = true; // Essential for receiving Extended Frames
 	filter.buffer = instanceId % 2;
 	this->filterId = this->canPort->addCanFilter(filter);
 }

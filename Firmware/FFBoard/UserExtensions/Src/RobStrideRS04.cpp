@@ -103,186 +103,199 @@ bool RobStrideRS04::motorReady() {
 // --- Protocol Implementations ---
 
 void RobStrideRS04::sendEnablePrivate() {
-	CAN_tx_msg msg;
-	msg.header.id = (3 << 24) | (uint32_t)masterId << 8 | motorId;
-	msg.header.extId = true;
-	msg.header.length = 8;
-	memset(msg.data, 0, 8);
-	canPort->sendMessage(msg);
+        CAN_tx_msg msg;
+        msg.header.id = (3 << 24) | (uint32_t)masterId << 16 | (uint32_t)motorId << 8;
+        msg.header.extId = true;
+        msg.header.length = 8;
+        memset(msg.data, 0, 8);
+        canPort->sendMessage(msg);
 }
 
 void RobStrideRS04::sendStopPrivate() {
-	CAN_tx_msg msg;
-	msg.header.id = (4 << 24) | (uint32_t)masterId << 8 | motorId;
-	msg.header.extId = true;
-	msg.header.length = 8;
-	memset(msg.data, 0, 8);
-	canPort->sendMessage(msg);
+        CAN_tx_msg msg;
+        msg.header.id = (4 << 24) | (uint32_t)masterId << 16 | (uint32_t)motorId << 8;
+        msg.header.extId = true;
+        msg.header.length = 8;
+        memset(msg.data, 0, 8);
+        canPort->sendMessage(msg);
 }
 
 void RobStrideRS04::sendEnableActiveReporting() {
-	if (protocol != RS04Protocol::PRIVATE) return;
-	CAN_tx_msg msg;
-	msg.header.id = (24 << 24) | (uint32_t)masterId << 8 | motorId;
-	msg.header.extId = true;
-	msg.header.length = 8;
-	memset(msg.data, 0, 8);
-	msg.data[0] = 0x01; // Enable reporting
-	canPort->sendMessage(msg);
+        if (protocol != RS04Protocol::PRIVATE) return;
+        CAN_tx_msg msg;
+        msg.header.id = (24 << 24) | (uint32_t)masterId << 16 | (uint32_t)motorId << 8;
+        msg.header.extId = true;
+        msg.header.length = 8;
+        memset(msg.data, 0, 8);
+        msg.data[0] = 0x01; // Enable reporting
+        canPort->sendMessage(msg);
 }
 
 void RobStrideRS04::sendTorquePrivate(float torque) {
-	CAN_tx_msg msg;
-	uint16_t t_int = float_to_uint(torque, -120.0f, 120.0f, 16);
-	msg.header.id = (1 << 24) | (uint32_t)t_int << 8 | motorId;
-	msg.header.extId = true;
-	msg.header.length = 8;
+        CAN_tx_msg msg;
+        uint16_t t_int = float_to_uint(torque, -120.0f, 120.0f, 16);
+        // Type 1: bits 8-23 are torque in some variants, but bits 8-15 are motor ID in others.
+        // For RS04/CyberGear: Type 1 ID is (1<<24) | (Torque<<8) | MotorID. 
+        // Wait, if MotorID is in 0-7, then we must check 0-7 in Rx.
+        // Let's stick to MotorID in 8-15 for all types to avoid confusion if RS04 supports it.
+        // Actually, the standard is: Type 1 uses 0-7 for MotorID, 8-23 for Torque.
+        // Other types use 8-15 for MotorID.
+        msg.header.id = (1 << 24) | (uint32_t)t_int << 8 | motorId;
+        msg.header.extId = true;
+        msg.header.length = 8;
 
-	uint16_t p_int = float_to_uint(0, -12.57f, 12.57f, 16);
-	uint16_t v_int = float_to_uint(0, -15.0f, 15.0f, 16);
-	uint16_t kp_int = float_to_uint(0, 0, 5000.0f, 16);
-	uint16_t kd_int = float_to_uint(0, 0, 100.0f, 16);
+        uint16_t p_int = float_to_uint(0, -12.57f, 12.57f, 16);
+        uint16_t v_int = float_to_uint(0, -15.0f, 15.0f, 16);
+        uint16_t kp_int = float_to_uint(0, 0, 5000.0f, 16);
+        uint16_t kd_int = float_to_uint(0, 0, 100.0f, 16);
 
-	msg.data[0] = p_int >> 8;
-	msg.data[1] = p_int & 0xFF;
-	msg.data[2] = v_int >> 8;
-	msg.data[3] = v_int & 0xFF;
-	msg.data[4] = kp_int >> 8;
-	msg.data[5] = kp_int & 0xFF;
-	msg.data[6] = kd_int >> 8;
-	msg.data[7] = kd_int & 0xFF;
+        msg.data[0] = p_int >> 8;
+        msg.data[1] = p_int & 0xFF;
+        msg.data[2] = v_int >> 8;
+        msg.data[3] = v_int & 0xFF;
+        msg.data[4] = kp_int >> 8;
+        msg.data[5] = kp_int & 0xFF;
+        msg.data[6] = kd_int >> 8;
+        msg.data[7] = kd_int & 0xFF;
 
-	canPort->sendMessage(msg);
+        canPort->sendMessage(msg);
 }
 
 void RobStrideRS04::enterMITMode() {
-	CAN_tx_msg msg;
-	msg.header.id = motorId;
-	msg.header.length = 8;
-	msg.header.extId = false;
-	memset(msg.data, 0xFF, 7);
-	msg.data[7] = 0xFC; 
-	canPort->sendMessage(msg);
+        CAN_tx_msg msg;
+        msg.header.id = motorId;
+        msg.header.length = 8;
+        msg.header.extId = false;
+        memset(msg.data, 0xFF, 7);
+        msg.data[7] = 0xFC; 
+        canPort->sendMessage(msg);
 }
 
 void RobStrideRS04::exitMITMode() {
-	CAN_tx_msg msg;
-	msg.header.id = motorId;
-	msg.header.length = 8;
-	msg.header.extId = false;
-	memset(msg.data, 0xFF, 7);
-	msg.data[7] = 0xFD; 
-	canPort->sendMessage(msg);
+        CAN_tx_msg msg;
+        msg.header.id = motorId;
+        msg.header.length = 8;
+        msg.header.extId = false;
+        memset(msg.data, 0xFF, 7);
+        msg.data[7] = 0xFD; 
+        canPort->sendMessage(msg);
 }
 
 void RobStrideRS04::sendTorqueMIT(float torque) {
-	CAN_tx_msg msg;
-	msg.header.id = motorId;
-	msg.header.length = 8;
-	msg.header.extId = false;
+        CAN_tx_msg msg;
+        msg.header.id = motorId;
+        msg.header.length = 8;
+        msg.header.extId = false;
 
-	uint16_t p_int = float_to_uint(0, -12.5f, 12.5f, 16);
-	uint16_t v_int = float_to_uint(0, -45.0f, 45.0f, 12);
-	uint16_t kp_int = float_to_uint(0, 0, 500.0f, 12);
-	uint16_t kd_int = float_to_uint(0, 0, 5.0f, 12);
-	uint16_t t_int = float_to_uint(torque, -120.0f, 120.0f, 12);
+        uint16_t p_int = float_to_uint(0, -12.5f, 12.5f, 16);
+        uint16_t v_int = float_to_uint(0, -45.0f, 45.0f, 12);
+        uint16_t kp_int = float_to_uint(0, 0, 500.0f, 12);
+        uint16_t kd_int = float_to_uint(0, 0, 5.0f, 12);
+        uint16_t t_int = float_to_uint(torque, -120.0f, 120.0f, 12);
 
-	msg.data[0] = p_int >> 8;
-	msg.data[1] = p_int & 0xFF;
-	msg.data[2] = v_int >> 4;
-	msg.data[3] = ((v_int & 0xF) << 4) | (kp_int >> 8);
-	msg.data[4] = kp_int & 0xFF;
-	msg.data[5] = kd_int >> 4;
-	msg.data[6] = ((kd_int & 0xF) << 4) | (t_int >> 8);
-	msg.data[7] = t_int & 0xFF;
+        msg.data[0] = p_int >> 8;
+        msg.data[1] = p_int & 0xFF;
+        msg.data[2] = v_int >> 4;
+        msg.data[3] = ((v_int & 0xF) << 4) | (kp_int >> 8);
+        msg.data[4] = kp_int & 0xFF;
+        msg.data[5] = kd_int >> 4;
+        msg.data[6] = ((kd_int & 0xF) << 4) | (t_int >> 8);
+        msg.data[7] = t_int & 0xFF;
 
-	canPort->sendMessage(msg);
+        canPort->sendMessage(msg);
 }
 
 // --- Helpers ---
 uint16_t RobStrideRS04::float_to_uint(float x, float x_min, float x_max, int bits) {
-	if (x > x_max) x = x_max;
-	if (x < x_min) x = x_min;
-	float span = x_max - x_min;
-	float offset = x_min;
-	return (uint16_t)((x - offset) * ((float)((1 << bits) - 1)) / span);
+        if (x > x_max) x = x_max;
+        if (x < x_min) x = x_min;
+        float span = x_max - x_min;
+        float offset = x_min;
+        return (uint16_t)((x - offset) * ((float)((1 << bits) - 1)) / span);
 }
 
 float RobStrideRS04::uint_to_float(int x_int, float x_min, float x_max, int bits) {
-	float span = x_max - x_min;
-	float offset = x_min;
-	return ((float)x_int) * span / ((float)((1 << bits) - 1)) + offset;
+        float span = x_max - x_min;
+        float offset = x_min;
+        return ((float)x_int) * span / ((float)((1 << bits) - 1)) + offset;
 }
 
 // --- Data Feedback ---
 void RobStrideRS04::canRxPendCallback(CANPort* port, CAN_rx_msg& msg) {
-	if (!msg.header.extId) { 
-		if (msg.header.id != motorId) return;
-		lastMessageTick = HAL_GetTick();
-		isConnected = true;
+        if (!msg.header.extId) { 
+                if (msg.header.id != motorId) return;
+                lastMessageTick = HAL_GetTick();
+                isConnected = true;
 
-		uint16_t p_int = (msg.data[1] << 8) | msg.data[2];
-		uint16_t v_int = (msg.data[3] << 4) | (msg.data[4] >> 4);
-		uint16_t t_int = ((msg.data[4] & 0xF) << 8) | msg.data[5];
-		
-		lastPos = uint_to_float(p_int, -12.5f, 12.5f, 16);
-		lastVelocity = uint_to_float(v_int, -45.0f, 45.0f, 12);
-		lastTorqueFeedback = uint_to_float(t_int, -12.0f, 12.0f, 12);
-		lastTemp = msg.data[6];
-	} else { 
-		uint8_t type = (msg.header.id >> 24) & 0x1F;
-		uint8_t respMotorId = (msg.header.id >> 8) & 0xFF;
-		
-		if (respMotorId == motorId) {
-			if (type == 2) { 
-				lastMessageTick = HAL_GetTick();
-				isConnected = true;
+                uint16_t p_int = (msg.data[1] << 8) | msg.data[2];
+                uint16_t v_int = (msg.data[3] << 4) | (msg.data[4] >> 4);
+                uint16_t t_int = ((msg.data[4] & 0xF) << 8) | msg.data[5];
 
-				uint16_t p_int = (msg.data[0] << 8) | msg.data[1];
-				uint16_t v_int = (msg.data[2] << 8) | msg.data[3];
-				uint16_t t_int = (msg.data[4] << 8) | msg.data[5];
+                lastPos = uint_to_float(p_int, -12.5f, 12.5f, 16);
+                lastVelocity = uint_to_float(v_int, -45.0f, 45.0f, 12);
+                lastTorqueFeedback = uint_to_float(t_int, -12.0f, 12.0f, 12);
+                lastTemp = msg.data[6];
+        } else { 
+                uint8_t type = (msg.header.id >> 24) & 0x1F;
+                uint8_t motorIdFromId = 0;
 
-				lastPos = uint_to_float(p_int, -12.57f, 12.57f, 16);
-				lastVelocity = uint_to_float(v_int, -15.0f, 15.0f, 16);
-				lastTorqueFeedback = uint_to_float(t_int, -120.0f, 120.0f, 16);
-				lastTemp = msg.data[6] / 10.0f;
-			} else if (type == 0) { 
-				lastMessageTick = HAL_GetTick();
-				isConnected = true;
-			}
-		}
-	}
+                // For Type 1, Motor ID is in bits 0-7. For others, usually in bits 8-15.
+                if (type == 1 || type == 2) {
+                    motorIdFromId = msg.header.id & 0xFF;
+                } else {
+                    motorIdFromId = (msg.header.id >> 8) & 0xFF;
+                }
+
+                if (motorIdFromId == motorId) {
+                        if (type == 1 || type == 2) { 
+                                lastMessageTick = HAL_GetTick();
+                                isConnected = true;
+
+                                uint16_t p_int = (msg.data[0] << 8) | msg.data[1];
+                                uint16_t v_int = (msg.data[2] << 8) | msg.data[3];
+                                uint16_t t_int = (msg.data[4] << 8) | msg.data[5];
+
+                                lastPos = uint_to_float(p_int, -12.57f, 12.57f, 16);
+                                lastVelocity = uint_to_float(v_int, -15.0f, 15.0f, 16);
+                                lastTorqueFeedback = uint_to_float(t_int, -120.0f, 120.0f, 16);
+                                lastTemp = msg.data[6] / 10.0f;
+                        } else if (type == 0) { 
+                                lastMessageTick = HAL_GetTick();
+                                isConnected = true;
+                        }
+                }
+        }
 }
 
 void RobStrideRS04::Run() {
-	if(this->canPort->getSpeedPreset() != 5){
-		this->canPort->setSpeedPreset(5); 
-	}
-	this->canPort->takePort();
+        if(this->canPort->getSpeedPreset() != 5){
+                this->canPort->setSpeedPreset(5); 
+        }
+        this->canPort->takePort();
 
-	bool wasConnected = false;
+        bool wasConnectedLocal = false;
 
-	while (true) {
-		if (HAL_GetTick() - lastMessageTick > 500) {
-			isConnected = false;
-		}
+        while (true) {
+                if (HAL_GetTick() - lastMessageTick > 500) {
+                        isConnected = false;
+                }
 
-		if (!isConnected && protocol == RS04Protocol::PRIVATE) {
-			CAN_tx_msg msg;
-			msg.header.id = (0 << 24) | (uint32_t)masterId << 8 | motorId;
-			msg.header.extId = true;
-			msg.header.length = 0;
-			canPort->sendMessage(msg);
-			wasConnected = false;
-		} else if (isConnected && !wasConnected && protocol == RS04Protocol::PRIVATE) {
-			sendEnableActiveReporting();
-			wasConnected = true;
-		}
-		
-		Delay(500);
-	}
+                if (!isConnected && protocol == RS04Protocol::PRIVATE) {
+                        CAN_tx_msg msg;
+                        // Heartbeat Type 0: bits 8-15 MotorID, 16-23 MasterID
+                        msg.header.id = (0 << 24) | (uint32_t)masterId << 16 | (uint32_t)motorId << 8;
+                        msg.header.extId = true;
+                        msg.header.length = 0;
+                        canPort->sendMessage(msg);
+                        wasConnectedLocal = false;
+                } else if (isConnected && !wasConnectedLocal && protocol == RS04Protocol::PRIVATE) {
+                        sendEnableActiveReporting();
+                        wasConnectedLocal = true;
+                }
+
+                Delay(500);
+        }
 }
-
 // --- Encoder & Storage Implementation ---
 int32_t RobStrideRS04::getPos() {
 	return (int32_t)(lastPos * 10430.378f); 
@@ -293,15 +306,14 @@ float RobStrideRS04::getPos_f() {
 }
 
 void RobStrideRS04::setPos(int32_t pos) {
-	CAN_tx_msg msg;
-	msg.header.id = (6 << 24) | (uint32_t)masterId << 8 | motorId;
-	msg.header.extId = true;
-	msg.header.length = 8;
-	memset(msg.data, 0, 8);
-	msg.data[0] = 0x01; 
-	canPort->sendMessage(msg);
+        CAN_tx_msg msg;
+        msg.header.id = (6 << 24) | (uint32_t)masterId << 16 | (uint32_t)motorId << 8;
+        msg.header.extId = true;
+        msg.header.length = 8;
+        memset(msg.data, 0, 8);
+        msg.data[0] = 0x01; 
+        canPort->sendMessage(msg);
 }
-
 void RobStrideRS04::restoreFlash() {
 	uint16_t val = 0;
 	if (Flash_Read(ADR_AXIS1_CONFIG + 20, &val)) {

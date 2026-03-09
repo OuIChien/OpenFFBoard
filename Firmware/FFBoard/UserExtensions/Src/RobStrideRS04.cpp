@@ -275,6 +275,7 @@ void RobStrideRS04::Run() {
 
         bool wasConnectedLocal = false;
         uint32_t lastHeartbeatTick = 0;
+        uint32_t lastActiveReportingTick = 0;
 
         while (true) {
                 uint32_t now = HAL_GetTick();
@@ -294,8 +295,12 @@ void RobStrideRS04::Run() {
                                         lastHeartbeatTick = now;
                                 }
                                 wasConnectedLocal = false;
-                        } else if (!wasConnectedLocal) {
-                                sendEnableActiveReporting();
+                        } else {
+                                // Periodically re-enable active reporting every 1s to keep high frequency even when idle
+                                if (now - lastActiveReportingTick > 1000) {
+                                        sendEnableActiveReporting();
+                                        lastActiveReportingTick = now;
+                                }
                                 wasConnectedLocal = true;
                         }
                 }

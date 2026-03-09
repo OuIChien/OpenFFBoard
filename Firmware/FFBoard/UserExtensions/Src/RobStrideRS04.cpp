@@ -239,8 +239,8 @@ void RobStrideRS04::canRxPendCallback(CANPort* port, CAN_rx_msg& msg) {
                 uint8_t type = (msg.header.id >> 24) & 0x1F;
                 uint8_t motorIdFromId = 0;
 
-                // For Type 1, Motor ID is in bits 0-7. For others, usually in bits 8-15.
-                if (type == 1 || type == 2) {
+                // For Type 1, Motor ID is in bits 0-7. For others (0:Heartbeat, 2:Feedback, etc), it is in bits 8-15.
+                if (type == 1) {
                     motorIdFromId = msg.header.id & 0xFF;
                 } else {
                     motorIdFromId = (msg.header.id >> 8) & 0xFF;
@@ -274,26 +274,33 @@ void RobStrideRS04::Run() {
         this->canPort->takePort();
 
         bool wasConnectedLocal = false;
+        uint32_t lastHeartbeatTick = 0;
 
         while (true) {
-                if (HAL_GetTick() - lastMessageTick > 500) {
+                uint32_t now = HAL_GetTick();
+                if (now - lastMessageTick > 500) {
                         isConnected = false;
                 }
 
-                if (!isConnected && protocol == RS04Protocol::PRIVATE) {
-                        CAN_tx_msg msg;
-                        // Heartbeat Type 0: bits 8-15 MotorID, 16-23 MasterID
-                        msg.header.id = (0 << 24) | (uint32_t)masterId << 16 | (uint32_t)motorId << 8;
-                        msg.header.extId = true;
-                        msg.header.length = 0;
-                        canPort->sendMessage(msg);
-                        wasConnectedLocal = false;
-                } else if (isConnected && !wasConnectedLocal && protocol == RS04Protocol::PRIVATE) {
-                        sendEnableActiveReporting();
-                        wasConnectedLocal = true;
+                if (protocol == RS04Protocol::PRIVATE) {
+                        if (!isConnected) {
+                                if (now - lastHeartbeatTick > 500) {
+                                        CAN_tx_msg msg;
+                                        // Heartbeat Type 0: bits 8-15 MotorID, 16-23 MasterID
+                                        msg.header.id = (0 << 24) | (uint32_t)masterId << 16 | (uint32_t)motorId << 8;
+                                        msg.header.extId = true;
+                                        msg.header.length = 0;
+                                        canPort->sendMessage(msg);
+                                        lastHeartbeatTick = now;
+                                }
+                                wasConnectedLocal = false;
+                        } else if (!wasConnectedLocal) {
+                                sendEnableActiveReporting();
+                                wasConnectedLocal = true;
+                        }
                 }
 
-                Delay(500);
+                Delay(20);
         }
 }
 // --- Encoder & Storage Implementation ---

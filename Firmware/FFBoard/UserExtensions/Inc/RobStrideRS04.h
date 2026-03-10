@@ -79,8 +79,7 @@ protected:
 	uint8_t masterId = 0xFD;
 	uint8_t instanceId = 0;
 	int32_t filterId = 0;
-	RS04Protocol protocol = RS04Protocol::MIT;
-	
+	RS04Protocol protocol = RS04Protocol::PRIVATE;	
 	float maxTorque = 5.0f; // Default 5Nm for safety
 	float lastPos = 0;
 	float lastVelocity = 0;

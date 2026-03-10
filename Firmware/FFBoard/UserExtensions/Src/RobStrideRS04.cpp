@@ -293,7 +293,7 @@
                          wasConnectedLocal = true;
                  }
  
-                 Delay(10);
+                 Delay(50);
          }
  }
  // --- Encoder & Storage Implementation ---

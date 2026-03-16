@@ -68,7 +68,7 @@ void RobStrideRS04::registerCommands() {
         registerCommand("temp", (uint32_t)RS04Commands::temp, "Motor temperature", CMDFLAG_GET);
         registerCommand("rawcan", (uint32_t)RS04Commands::rawcan, "Last CAN ID received", CMDFLAG_GET);
         registerCommand("lasterr", (uint32_t)RS04Commands::lasterr, "Last rejection reason", CMDFLAG_GET);
-        registerCommand("readparam", (uint32_t)RS04Commands::readparam, "Read param by index", CMDFLAG_GETSET);
+        registerCommand("readparam", (uint32_t)RS04Commands::readparam, "Read param by index", CMDFLAG_GET | CMDFLAG_SET);
         registerCommand("writeparam", (uint32_t)RS04Commands::writeparam, "Write param (index:val)", CMDFLAG_SET);
         registerCommand("savemotor", (uint32_t)RS04Commands::savemotor, "Save to motor EEPROM", CMDFLAG_SET);
         registerCommand("version", (uint32_t)RS04Commands::version, "Motor version", CMDFLAG_GET);
@@ -460,7 +460,7 @@ CommandStatus RobStrideRS04::command(const ParsedCommand& cmd, std::vector<Comma
                 break;
         case RS04Commands::writeparam:
                 if (cmd.type == CMDtype::set) {
-                        sendWriteParam(cmd.adr, cmd.fval);
+                        sendWriteParam(cmd.adr, (float)cmd.val);
                 }
                 break;
         case RS04Commands::savemotor:

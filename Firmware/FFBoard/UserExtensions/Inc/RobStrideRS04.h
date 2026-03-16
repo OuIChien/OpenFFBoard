@@ -23,7 +23,8 @@
 enum class RS04Protocol : uint8_t { MIT = 0, PRIVATE = 1 };
 
 enum class RS04Commands : uint32_t {
-	canid, protocol, maxtorque, connected, errors, temp
+	canid, protocol, maxtorque, connected, errors, temp, rawcan, lasterr,
+	readparam, writeparam, savemotor, version, faultbits
 };
 
 class RobStrideRS04 : public MotorDriver, public PersistentStorage, public Encoder, public CanHandler, public CommandHandler, cpp_freertos::Thread {
@@ -67,6 +68,10 @@ protected:
 	void sendEnablePrivate();
 	void sendStopPrivate();
 	void sendEnableActiveReporting();
+	void sendReadParam(uint16_t index);
+	void sendWriteParam(uint16_t index, float value);
+	void sendSaveMotor();
+	void sendRequestVersion();
 	void enterMITMode();
 	void exitMITMode();
 	
@@ -90,6 +95,14 @@ protected:
 	bool isConnected = false;
 	bool isActive = false;
 	bool modeSynced = false;
+
+	uint32_t lastRawId = 0;
+	uint8_t lastRawData[8] = {0};
+	uint32_t lastError = 0; // 0: OK, 1: Wrong ID, 2: Wrong Type (Private), 3: Wrong MasterID (MIT), 4: Wrong MotorID (MIT)
+	uint32_t faultBits = 0; // Fault bits from motor
+	uint16_t lastReadParamIndex = 0;
+	float lastReadParamValue = 0;
+	char versionString[16] = "Unknown";
 
 	void registerCommands();
 };

@@ -49,10 +49,13 @@ RobStrideRS04::~RobStrideRS04() {
 
 void RobStrideRS04::setCanFilter() {
         CAN_filter filter;
+        filter.buffer = instanceId % 2;
+        
+        // Disable filtering to see all packets for debugging
         filter.filter_id = 0; 
         filter.filter_mask = 0; 
         filter.extid = true; 
-        filter.buffer = instanceId % 2;
+        
         this->filterId = this->canPort->addCanFilter(filter);
 }
 
@@ -63,6 +66,13 @@ void RobStrideRS04::registerCommands() {
         registerCommand("maxtorque", (uint32_t)RS04Commands::maxtorque, "Max torque scale (Nm)", CMDFLAG_GET | CMDFLAG_SET);
         registerCommand("connected", (uint32_t)RS04Commands::connected, "Connection state", CMDFLAG_GET);
         registerCommand("temp", (uint32_t)RS04Commands::temp, "Motor temperature", CMDFLAG_GET);
+        registerCommand("rawcan", (uint32_t)RS04Commands::rawcan, "Last CAN ID received", CMDFLAG_GET);
+        registerCommand("lasterr", (uint32_t)RS04Commands::lasterr, "Last rejection reason", CMDFLAG_GET);
+        registerCommand("readparam", (uint32_t)RS04Commands::readparam, "Read param by index", CMDFLAG_GETSET);
+        registerCommand("writeparam", (uint32_t)RS04Commands::writeparam, "Write param (index:val)", CMDFLAG_SET);
+        registerCommand("savemotor", (uint32_t)RS04Commands::savemotor, "Save to motor EEPROM", CMDFLAG_SET);
+        registerCommand("version", (uint32_t)RS04Commands::version, "Motor version", CMDFLAG_GET);
+        registerCommand("faultbits", (uint32_t)RS04Commands::faultbits, "Detailed fault bits", CMDFLAG_GET);
 }
 
 // --- Motor Control ---
@@ -129,7 +139,51 @@ void RobStrideRS04::sendEnableActiveReporting() {
         msg.header.extId = true;
         msg.header.length = 8;
         memset(msg.data, 0, 8);
-        msg.data[0] = 0x01; // Enable reporting
+        // Manual Page 38 indicates F_CMD is at index 6 (7th byte) for Type 24
+        msg.data[6] = 0x01; 
+        canPort->sendMessage(msg);
+}
+
+void RobStrideRS04::sendReadParam(uint16_t index) {
+        CAN_tx_msg msg;
+        msg.header.id = (17 << 24) | (uint32_t)masterId << 8 | (uint32_t)motorId; 
+        msg.header.extId = true;
+        msg.header.length = 8;
+        memset(msg.data, 0, 8);
+        msg.data[0] = index & 0xFF;
+        msg.data[1] = (index >> 8) & 0xFF;
+        canPort->sendMessage(msg);
+}
+
+void RobStrideRS04::sendWriteParam(uint16_t index, float value) {
+        CAN_tx_msg msg;
+        msg.header.id = (18 << 24) | (uint32_t)masterId << 8 | (uint32_t)motorId;
+        msg.header.extId = true;
+        msg.header.length = 8;
+        memset(msg.data, 0, 8);
+        msg.data[0] = index & 0xFF;
+        msg.data[1] = (index >> 8) & 0xFF;
+        
+        // Data format depends on parameter. Most 0x7000 are float IEEE-754
+        memcpy(&msg.data[4], &value, 4);
+        canPort->sendMessage(msg);
+}
+
+void RobStrideRS04::sendSaveMotor() {
+        CAN_tx_msg msg;
+        msg.header.id = (22 << 24) | (uint32_t)masterId << 8 | (uint32_t)motorId;
+        msg.header.extId = true;
+        msg.header.length = 8;
+        for(int i=0; i<8; i++) msg.data[i] = i+1; // 01 02 ... 08
+        canPort->sendMessage(msg);
+}
+
+void RobStrideRS04::sendRequestVersion() {
+        CAN_tx_msg msg;
+        msg.header.id = (26 << 24) | (uint32_t)masterId << 8 | (uint32_t)motorId;
+        msg.header.extId = true;
+        msg.header.length = 8;
+        memset(msg.data, 0, 8);
         canPort->sendMessage(msg);
 }
 
@@ -219,10 +273,20 @@ float RobStrideRS04::uint_to_float(int x_int, float x_min, float x_max, int bits
 
 // --- Data Feedback ---
 void RobStrideRS04::canRxPendCallback(CANPort* port, CAN_rx_msg& msg) {
+        lastRawId = msg.header.id;
         if (!msg.header.extId) { 
-                if (msg.header.id != motorId) return;
+                // MIT Mode feedback: ID is MasterID (usually 0xFD), Data[0] is Motor ID
+                if (msg.header.id != masterId) {
+                        lastError = 3; // Wrong MasterID (MIT)
+                        return;
+                }
+                if (msg.data[0] != motorId) {
+                        lastError = 4; // Wrong MotorID (MIT)
+                        return;
+                }
                 lastMessageTick = HAL_GetTick();
                 isConnected = true;
+                lastError = 0;
 
                 uint16_t p_int = (msg.data[1] << 8) | msg.data[2];
                 uint16_t v_int = (msg.data[3] << 4) | (msg.data[4] >> 4);
@@ -231,16 +295,20 @@ void RobStrideRS04::canRxPendCallback(CANPort* port, CAN_rx_msg& msg) {
                 lastPos = uint_to_float(p_int, -12.5f, 12.5f, 16);
                 lastVelocity = uint_to_float(v_int, -45.0f, 45.0f, 12);
                 lastTorqueFeedback = uint_to_float(t_int, -12.0f, 12.0f, 12);
-                lastTemp = msg.data[6];
+                
+                // Temp * 10 is in bytes 6-7
+                int16_t temp_int = (int16_t)(msg.data[6] << 8 | msg.data[7]);
+                lastTemp = (float)temp_int / 10.0f;
         } else { 
                 uint8_t type = (msg.header.id >> 24) & 0x1F;
-                uint8_t motorIdFromId = msg.header.id & 0xFF;
+                uint8_t senderMotorId = (msg.header.id >> 8) & 0xFF;
 
-                if (motorIdFromId == motorId) {
+                if (senderMotorId == motorId) {
+                        lastMessageTick = HAL_GetTick();
+                        isConnected = true;
+                        lastError = 0;
+
                         if (type == 1 || type == 2) { 
-                                lastMessageTick = HAL_GetTick();
-                                isConnected = true;
-
                                 uint16_t p_int = (msg.data[0] << 8) | msg.data[1];
                                 uint16_t v_int = (msg.data[2] << 8) | msg.data[3];
                                 uint16_t t_int = (msg.data[4] << 8) | msg.data[5];
@@ -248,11 +316,24 @@ void RobStrideRS04::canRxPendCallback(CANPort* port, CAN_rx_msg& msg) {
                                 lastPos = uint_to_float(p_int, -12.57f, 12.57f, 16);
                                 lastVelocity = uint_to_float(v_int, -15.0f, 15.0f, 16);
                                 lastTorqueFeedback = uint_to_float(t_int, -120.0f, 120.0f, 16);
-                                lastTemp = msg.data[6] / 10.0f;
-                        } else if (type == 0) { 
-                                lastMessageTick = HAL_GetTick();
-                                isConnected = true;
+                                
+                                int16_t temp_int = (int16_t)(msg.data[6] << 8 | msg.data[7]);
+                                lastTemp = (float)temp_int / 10.0f;
+
+                                // Type 2 ID Bits 21~16 are fault info according to Page 35.
+                                faultBits = (msg.header.id >> 16) & 0x3F; 
+                        } else if (type == 17) { // Read Response
+                                lastReadParamIndex = (msg.data[1] << 8) | msg.data[0];
+                                memcpy(&lastReadParamValue, &msg.data[4], 4);
+                        } else if (type == 21) { // Fault frame
+                                faultBits = (msg.data[3] << 24) | (msg.data[2] << 16) | (msg.data[1] << 8) | msg.data[0];
+                        } else if (type == 26) { // Version Response
+                                snprintf(versionString, 16, "%d.%d.%d.%d", msg.data[2], msg.data[3], msg.data[4], msg.data[5]);
+                        } else if (type == 0) {
+                                // Just heartbeat response
                         }
+                } else {
+                        lastError = 1; // Wrong MotorID (Private)
                 }
         }
 }
@@ -342,12 +423,18 @@ CommandStatus RobStrideRS04::command(const ParsedCommand& cmd, std::vector<Comma
                 if (cmd.type == CMDtype::set) setCanFilter(); 
                 break;
         case RS04Commands::protocol:
-                if (cmd.type == CMDtype::set) protocol = (RS04Protocol)cmd.val;
-                else replies.emplace_back((uint8_t)protocol);
+                if (cmd.type == CMDtype::set) {
+                        protocol = (RS04Protocol)cmd.val;
+                        setCanFilter();
+                } else {
+                        replies.emplace_back((uint8_t)protocol);
+                }
                 break;
         case RS04Commands::maxtorque:
                 if (cmd.type == CMDtype::set) {
-                        maxTorque = (float)cmd.val / 100.0f;
+                        float requestedTorque = (float)cmd.val / 100.0f;
+                        // Safety threshold: 0.5Nm min to 15.0Nm max (between Entry and Pro levels)
+                        maxTorque = std::max(0.5f, std::min(requestedTorque, 15.0f));
                 } else {
                         replies.emplace_back((uint32_t)(maxTorque * 100.0f));
                 }
@@ -357,6 +444,34 @@ CommandStatus RobStrideRS04::command(const ParsedCommand& cmd, std::vector<Comma
                 break;
         case RS04Commands::temp:
                 replies.emplace_back((int32_t)(lastTemp * 100));
+                break;
+        case RS04Commands::rawcan:
+                replies.emplace_back((uint32_t)lastRawId);
+                break;
+        case RS04Commands::lasterr:
+                replies.emplace_back((uint32_t)lastError);
+                break;
+        case RS04Commands::readparam:
+                if (cmd.type == CMDtype::set) {
+                        sendReadParam(cmd.val);
+                } else {
+                        replies.emplace_back(lastReadParamValue);
+                }
+                break;
+        case RS04Commands::writeparam:
+                if (cmd.type == CMDtype::set) {
+                        sendWriteParam(cmd.adr, cmd.fval);
+                }
+                break;
+        case RS04Commands::savemotor:
+                sendSaveMotor();
+                break;
+        case RS04Commands::version:
+                sendRequestVersion();
+                replies.emplace_back(versionString);
+                break;
+        case RS04Commands::faultbits:
+                replies.emplace_back((uint32_t)faultBits);
                 break;
         default:
                 return CommandStatus::NOT_FOUND;

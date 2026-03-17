@@ -75,7 +75,7 @@ void RobStrideRS04::registerCommands() {
         registerCommand("faultbits", (uint32_t)RS04Commands::faultbits, "Detailed fault bits", CMDFLAG_GET);
         registerCommand("enable", (uint32_t)RS04Commands::enable, "Enable motor", CMDFLAG_SET);
         registerCommand("stop", (uint32_t)RS04Commands::stop, "Stop motor / Clear fault", CMDFLAG_SET);
-        registerCommand("setzero", (uint32_t)RS04Commands::setzero, "Set mechanical zero", CMDFLAG_SET);
+        registerCommand("setzero", (uint32_t)RS04Commands::setzero, "Set mechanical zero", CMDFLAG_GET | CMDFLAG_SET);
 }
 
 // --- Motor Control ---

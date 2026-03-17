@@ -73,6 +73,9 @@ void RobStrideRS04::registerCommands() {
         registerCommand("savemotor", (uint32_t)RS04Commands::savemotor, "Save to motor EEPROM", CMDFLAG_SET);
         registerCommand("version", (uint32_t)RS04Commands::version, "Motor version", CMDFLAG_GET);
         registerCommand("faultbits", (uint32_t)RS04Commands::faultbits, "Detailed fault bits", CMDFLAG_GET);
+        registerCommand("enable", (uint32_t)RS04Commands::enable, "Enable motor", CMDFLAG_SET);
+        registerCommand("stop", (uint32_t)RS04Commands::stop, "Stop motor / Clear fault", CMDFLAG_SET);
+        registerCommand("setzero", (uint32_t)RS04Commands::setzero, "Set mechanical zero", CMDFLAG_SET);
 }
 
 // --- Motor Control ---
@@ -472,6 +475,24 @@ CommandStatus RobStrideRS04::command(const ParsedCommand& cmd, std::vector<Comma
                 break;
         case RS04Commands::faultbits:
                 replies.emplace_back((uint32_t)faultBits);
+                break;
+        case RS04Commands::enable:
+                startMotor();
+                break;
+        case RS04Commands::stop:
+                if (protocol == RS04Protocol::PRIVATE) {
+                        CAN_tx_msg msg;
+                        msg.header.id = (4 << 24) | (uint32_t)masterId << 8 | (uint32_t)motorId;
+                        msg.header.extId = true;
+                        msg.header.length = 8;
+                        memset(msg.data, 0, 8);
+                        msg.data[0] = 1; // Clear fault bit
+                        canPort->sendMessage(msg);
+                }
+                stopMotor();
+                break;
+        case RS04Commands::setzero:
+                setPos(0);
                 break;
         default:
                 return CommandStatus::NOT_FOUND;

@@ -24,7 +24,7 @@ enum class RS04Protocol : uint8_t { MIT = 0, PRIVATE = 1 };
 
 enum class RS04Commands : uint32_t {
 	canid, protocol, maxtorque, connected, errors, temp, rawcan, lasterr,
-	readparam, writeparam, savemotor, version, faultbits
+	readparam, writeparam, savemotor, version, faultbits, enable, stop, setzero
 };
 
 class RobStrideRS04 : public MotorDriver, public PersistentStorage, public Encoder, public CanHandler, public CommandHandler, cpp_freertos::Thread {

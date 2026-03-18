@@ -65,6 +65,7 @@ void RobStrideRS04::registerCommands() {
         registerCommand("protocol", (uint32_t)RS04Commands::protocol, "0:MIT, 1:Private", CMDFLAG_GET | CMDFLAG_SET);
         registerCommand("maxtorque", (uint32_t)RS04Commands::maxtorque, "Max torque scale (Nm)", CMDFLAG_GET | CMDFLAG_SET);
         registerCommand("connected", (uint32_t)RS04Commands::connected, "Connection state", CMDFLAG_GET);
+        registerCommand("errors", (uint32_t)RS04Commands::errors, "Error state", CMDFLAG_GET);
         registerCommand("temp", (uint32_t)RS04Commands::temp, "Motor temperature", CMDFLAG_GET);
         registerCommand("rawcan", (uint32_t)RS04Commands::rawcan, "Last CAN ID received", CMDFLAG_GET);
         registerCommand("lasterr", (uint32_t)RS04Commands::lasterr, "Last rejection reason", CMDFLAG_GET);
@@ -73,8 +74,9 @@ void RobStrideRS04::registerCommands() {
         registerCommand("savemotor", (uint32_t)RS04Commands::savemotor, "Save to motor EEPROM", CMDFLAG_SET);
         registerCommand("version", (uint32_t)RS04Commands::version, "Motor version", CMDFLAG_GET);
         registerCommand("faultbits", (uint32_t)RS04Commands::faultbits, "Detailed fault bits", CMDFLAG_GET);
-        registerCommand("enable", (uint32_t)RS04Commands::enable, "Enable motor", CMDFLAG_SET);
-        registerCommand("stop", (uint32_t)RS04Commands::stop, "Stop motor / Clear fault", CMDFLAG_SET);
+        registerCommand("enable", (uint32_t)RS04Commands::enable, "Enable motor", CMDFLAG_GET | CMDFLAG_SET);
+        registerCommand("stop", (uint32_t)RS04Commands::stop, "Stop motor / Clear fault", CMDFLAG_GET | CMDFLAG_SET);
+        registerCommand("damper", (uint32_t)RS04Commands::damper, "0:Enable drag, 1:Disable", CMDFLAG_GET | CMDFLAG_SET);
         registerCommand("setzero", (uint32_t)RS04Commands::setzero, "Set mechanical zero", CMDFLAG_GET | CMDFLAG_SET);
 }
 
